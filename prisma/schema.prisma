@@ -1,0 +1,174 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql" // Change to your preferred database
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String    @id @default(cuid())
+  name      String
+  email     String    @unique
+  vehicles  Vehicle[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Vehicle {
+  id                String           @id @default(cuid())
+  plate             String?          @unique
+  make              String
+  model             String
+  year              Int
+  trim              String?
+  color             String?
+  nickname          String?
+  vin               String?          @unique
+  engine            String?
+  enginePower       String?
+  transmission      String?
+  fuelType          String?          @default("87")
+  tankCapacity      Float?
+  tankCapacityUnit  String?          @default("gal")
+  tirePressure      String?
+  tirePressureUnit  String?          @default("PSI")
+  oilType           String?
+  oilSpecification  String?
+  batteryVoltage    String?
+  owner             User?            @relation(fields: [ownerId], references: [id])
+  ownerId           String?
+  currentOdometer   Float?
+  odometerUnit      String?          @default("mi")
+  registrationNumber String?
+  registrationExpiry DateTime?
+  insuranceProvider String?
+  insurancePolicy   String?
+  insuranceExpiry   DateTime?
+  emissionsDueDate  DateTime?
+  emissionsStatus   String?
+  assignedTo        String?
+  imageUrl          String?
+  isActive          Boolean          @default(true)
+  fuelEntries       FuelEntry[]
+  maintenanceEntries MaintenanceEntry[]
+  odometerReadings  OdometerReading[]
+  quickUpdates      QuickUpdate[]
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  @@map("vehicles")
+}
+
+model FuelEntry {
+  id                String    @id @default(cuid())
+  vehicle           Vehicle   @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  vehicleId         String
+  date              DateTime  @default(now())
+  odometer          Float
+  odometerUnit      String    @default("mi")
+  tripDistance      Float?
+  tripUnit          String?   @default("mi")
+  volume            Float
+  volumeUnit        String    @default("gal")
+  priceTotal        Float
+  currency          String    @default("USD")
+  pricePerUnit      Float?
+  station           String?
+  stationName       String?
+  fuelType          String?
+  notes             String?
+  efficiency        Float?    // MPG calculated
+  efficiencyUnit    String?   @default("MPG")
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@map("fuel_entries")
+}
+
+model MaintenanceEntry {
+  id                String              @id @default(cuid())
+  vehicle           Vehicle             @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  vehicleId         String
+  type              MaintenanceType
+  title             String?
+  description       String?
+  odometer          Float?
+  odometerUnit      String?             @default("mi")
+  cost              Float?
+  currency          String?             @default("USD")
+  shop              String?
+  provider          String?
+  date              DateTime            @default(now())
+  dueDate           DateTime?
+  completed         Boolean             @default(false)
+  completedAt       DateTime?
+  notes             String?
+  parts             MaintenancePart[]
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  @@map("maintenance_entries")
+}
+
+model MaintenancePart {
+  id                String            @id @default(cuid())
+  maintenanceEntry  MaintenanceEntry  @relation(fields: [maintenanceEntryId], references: [id], onDelete: Cascade)
+  maintenanceEntryId String
+  name              String
+  partNumber        String?
+  quantity          Float             @default(1)
+  cost              Float?
+  currency          String?           @default("USD")
+  notes             String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  @@map("maintenance_parts")
+}
+
+model OdometerReading {
+  id                String    @id @default(cuid())
+  vehicle           Vehicle   @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  vehicleId         String
+  odometer          Float
+  odometerUnit      String    @default("mi")
+  date              DateTime  @default(now())
+  notes             String?
+  source            String?   @default("manual")
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@map("odometer_readings")
+}
+
+model QuickUpdate {
+  id                String    @id @default(cuid())
+  vehicle           Vehicle   @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  vehicleId         String
+  odometer          Float?
+  odometerUnit      String?   @default("mi")
+  fuelLevel         Float?    // percentage
+  fuelLevelUnit     String?   @default("%")
+  date              DateTime  @default(now())
+  notes             String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@map("quick_updates")
+}
+
+enum MaintenanceType {
+  OIL
+  MECHANICAL
+  ELECTRICAL
+  DOCUMENTATION
+  TIRES
+  BRAKES
+  FILTERS
+  OTHER
+}
