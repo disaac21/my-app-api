@@ -1,174 +1,316 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// Vehicle hub schema.
+//
+// Design rules:
+//  - `params` is a key/value registry. Every unit, currency, enum value and
+//    scalar setting is a row: `(kind, key) -> value (jsonb)`. Adding a fuel
+//    type or maintenance type is data, not a migration.
+//  - Rows still have an `id`, so all `*Id` columns can keep real foreign keys
+//    and `onDelete: Restrict` protection. This is the only way to have both a
+//    KV table and referential integrity: Postgres cannot FK into JSON.
+//  - `ParamKind` is the only native enum: it is the shape of the registry that
+//    code must switch on. Everything under a kind is data.
+//  - All measurements are stored in the BASE unit declared in `params`
+//    (`value.isBase = true` for DISTANCE_UNIT / VOLUME_UNIT / PRESSURE_UNIT).
+//    Base units are immutable. Never flip `isBase` on a live database.
+//  - Money is Decimal, never Float. Timestamps are timestamptz. Dates are date.
+//  - Derived values ARE stored (pricePerUnit, efficiency, tripDistance,
+//    currentOdometer, nextDueAt/nextDueDistance) for cheap reads. Every write
+//    path that can change an input must recompute them.
+//  - Nothing is deleted by cascade. Child FKs use onDelete: Restrict; deleting
+//    a vehicle is a soft delete (isActive = false) that also archives its
+//    documents. No history is lost, and a mistaken delete is reversible.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql" // Change to your preferred database
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id        String    @id @default(cuid())
-  name      String
-  email     String    @unique
-  vehicles  Vehicle[]
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+enum ParamKind {
+  // unit configuration (value: { label, symbol, factorToBase, isBase, sortOrder })
+  DISTANCE_UNIT
+  VOLUME_UNIT
+  PRESSURE_UNIT
+  // selectable value sets (value: { label, sortOrder })
+  CURRENCY
+  FUEL_TYPE
+  TRANSMISSION_TYPE
+  DRIVE_TYPE
+  MAINTENANCE_TYPE
+  DOCUMENT_TYPE
+  DOCUMENT_GROUP
+  READING_SOURCE
+  // scalar app settings (value: any JSON, e.g. "KM")
+  SETTING
+}
+
+/// One row per parameter, unit, or enum value.
+///
+/// value shapes by kind:
+///   DISTANCE_UNIT   { "label": "Miles", "symbol": "mi",
+///                     "factorToBase": 1.609344, "isBase": false, "sortOrder": 1 }
+///   FUEL_TYPE       { "label": "Diesel", "sortOrder": 1 }
+///   SETTING         "KM"            // arbitrary JSON; the setting's value
+model Param {
+  id       String    @id @default(cuid())
+  kind     ParamKind
+  /// Stable identifier used by code and the API ("KM", "DIESEL", "OIL").
+  /// Treat as a contract: edit labels inside `value`, never rename `key`.
+  key      String
+  value    Json
+  /// Retire a value instead of deleting it. Referenced rows cannot be deleted
+  /// anyway (onDelete: Restrict on every FK below).
+  isActive Boolean   @default(true)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
+
+  vehiclesByFuelType     Vehicle[] @relation("VehicleFuelType")
+  vehiclesByTransmission Vehicle[] @relation("VehicleTransmission")
+  vehiclesByDriveType    Vehicle[] @relation("VehicleDriveType")
+
+  readings           VehicleReading[]   @relation("ReadingSource")
+  fuelEntries        FuelEntry[]        @relation("FuelEntryFuelType")
+  maintenanceEntries MaintenanceEntry[] @relation("MaintenanceEntryType")
+  maintenancePlans   MaintenancePlan[]  @relation("MaintenancePlanType")
+  documents          VehicleDocument[]  @relation("DocumentType")
+  documentGroups     VehicleDocument[]  @relation("DocumentGroup")
+
+  @@unique([kind, key])
+  @@index([kind])
+  @@map("params")
+}
+
+model Make {
+  id     String  @id @default(cuid())
+  name   String  @unique
+  models Model[]
+
+  @@map("makes")
+}
+
+/// A model always belongs to exactly one make, so `Vehicle` only stores
+/// `modelId` — the make is reached through the relation, never duplicated.
+model Model {
+  id       String    @id @default(cuid())
+  makeId   String
+  make     Make      @relation(fields: [makeId], references: [id], onDelete: Restrict)
+  name     String
+  vehicles Vehicle[]
+
+  @@unique([makeId, name])
+  @@index([makeId])
+  @@map("models")
 }
 
 model Vehicle {
-  id                String           @id @default(cuid())
-  plate             String?          @unique
-  make              String
-  model             String
-  year              Int
-  trim              String?
-  color             String?
-  nickname          String?
-  vin               String?          @unique
-  engine            String?
-  enginePower       String?
-  transmission      String?
-  fuelType          String?          @default("87")
-  tankCapacity      Float?
-  tankCapacityUnit  String?          @default("gal")
-  tirePressure      String?
-  tirePressureUnit  String?          @default("PSI")
-  oilType           String?
-  oilSpecification  String?
-  batteryVoltage    String?
-  owner             User?            @relation(fields: [ownerId], references: [id])
-  ownerId           String?
-  currentOdometer   Float?
-  odometerUnit      String?          @default("mi")
-  registrationNumber String?
-  registrationExpiry DateTime?
-  insuranceProvider String?
-  insurancePolicy   String?
-  insuranceExpiry   DateTime?
-  emissionsDueDate  DateTime?
-  emissionsStatus   String?
-  assignedTo        String?
-  imageUrl          String?
-  isActive          Boolean          @default(true)
-  fuelEntries       FuelEntry[]
-  maintenanceEntries MaintenanceEntry[]
-  odometerReadings  OdometerReading[]
-  quickUpdates      QuickUpdate[]
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
+  id      String @id @default(cuid())
+  modelId String
+  model   Model  @relation(fields: [modelId], references: [id], onDelete: Restrict)
 
+  year     Int
+  trim     String?
+  nickname String?
+  /// Required and unique: with VIN gone this is the vehicle's identity.
+  plate    String  @unique
+  colorHex String? @db.VarChar(7) // #RRGGBB
+
+  engine         String?
+  fuelTypeId     String?
+  fuelType       Param?  @relation("VehicleFuelType", fields: [fuelTypeId], references: [id], onDelete: Restrict)
+  transmissionId String?
+  transmission   Param?  @relation("VehicleTransmission", fields: [transmissionId], references: [id], onDelete: Restrict)
+  driveTypeId    String?
+  driveType      Param?  @relation("VehicleDriveType", fields: [driveTypeId], references: [id], onDelete: Restrict)
+
+  /// Stored in the base volume unit (params.VOLUME_UNIT where value.isBase).
+  tankCapacity      Decimal? @db.Decimal(6, 1)
+  /// Stored in the base pressure unit (params.PRESSURE_UNIT where value.isBase).
+  tirePressureFront Int?
+  tirePressureRear  Int?
+
+  oilType          String?
+  oilSpecification String?
+  batteryVoltage   Decimal? @db.Decimal(4, 1)
+
+  /// Derived cache of the latest reading. Stored in the base distance unit.
+  currentOdometer Decimal? @db.Decimal(10, 1)
+
+  readings           VehicleReading[]
+  fuelEntries        FuelEntry[]
+  maintenanceEntries MaintenanceEntry[]
+  maintenancePlans   MaintenancePlan[]
+  documents          VehicleDocument[]
+
+  /// Soft-delete flag. "Deleting" a vehicle sets this to false and touches no
+  /// child rows. Restore by reactivating the same row — the plate stays
+  /// reserved, so there is deliberately no duplicate-create path.
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
+
+  @@index([modelId])
   @@map("vehicles")
 }
 
-model FuelEntry {
-  id                String    @id @default(cuid())
-  vehicle           Vehicle   @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
-  vehicleId         String
-  date              DateTime  @default(now())
-  odometer          Float
-  odometerUnit      String    @default("mi")
-  tripDistance      Float?
-  tripUnit          String?   @default("mi")
-  volume            Float
-  volumeUnit        String    @default("gal")
-  priceTotal        Float
-  currency          String    @default("USD")
-  pricePerUnit      Float?
-  station           String?
-  stationName       String?
-  fuelType          String?
-  notes             String?
-  efficiency        Float?    // MPG calculated
-  efficiencyUnit    String?   @default("MPG")
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+/// Merged odometer + fuel-level timeline (replaces odometer_readings and
+/// quick_updates). At least one measurement must be present.
+model VehicleReading {
+  id        String  @id @default(cuid())
+  vehicleId String
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
 
+  odometer     Decimal? @db.Decimal(10, 1)
+  fuelLevelPct Int?
+  sourceId     String?
+  source       Param?   @relation("ReadingSource", fields: [sourceId], references: [id], onDelete: Restrict)
+
+  recordedAt DateTime @default(now()) @db.Timestamptz(3)
+  notes      String?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
+
+  @@index([vehicleId, recordedAt(sort: Desc)])
+  @@map("vehicle_readings")
+}
+
+model FuelEntry {
+  id        String  @id @default(cuid())
+  vehicleId String
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+
+  filledAt DateTime @default(now()) @db.Timestamptz(3)
+
+  /// Stored in the base distance unit.
+  odometer Decimal @db.Decimal(10, 1)
+  /// Stored in the base volume unit.
+  volume   Decimal @db.Decimal(8, 3)
+
+  priceTotal Decimal @db.Decimal(12, 2)
+
+  station    String?
+  fuelTypeId String?
+  fuelType   Param?  @relation("FuelEntryFuelType", fields: [fuelTypeId], references: [id], onDelete: Restrict)
+
+  /// Both flags are required for correct fuel-economy maths: a partial fill-up
+  /// or a skipped logging session breaks the distance/volume ratio.
+  isFullTank          Boolean @default(true)
+  missedPreviousEntry Boolean @default(false)
+
+  // ── stored derived values ──────────────────────────────────────────────
+  /// priceTotal / volume.
+  pricePerUnit Decimal? @db.Decimal(12, 4)
+  /// distance since the previous fill / volume, in base distance per base volume.
+  efficiency   Decimal? @db.Decimal(8, 3)
+  /// odometer - previous odometer, in base distance.
+  tripDistance Decimal? @db.Decimal(10, 1)
+
+  notes String?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
+
+  @@index([vehicleId, filledAt(sort: Desc)])
   @@map("fuel_entries")
 }
 
+/// Work that was actually done. Scheduling lives in MaintenancePlan.
 model MaintenanceEntry {
-  id                String              @id @default(cuid())
-  vehicle           Vehicle             @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
-  vehicleId         String
-  type              MaintenanceType
-  title             String?
-  description       String?
-  odometer          Float?
-  odometerUnit      String?             @default("mi")
-  cost              Float?
-  currency          String?             @default("USD")
-  shop              String?
-  provider          String?
-  date              DateTime            @default(now())
-  dueDate           DateTime?
-  completed         Boolean             @default(false)
-  completedAt       DateTime?
-  notes             String?
-  parts             MaintenancePart[]
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
+  id        String  @id @default(cuid())
+  vehicleId String
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
 
+  typeId String
+  type   Param  @relation("MaintenanceEntryType", fields: [typeId], references: [id], onDelete: Restrict)
+
+  title       String?
+  description String?
+
+  performedAt DateTime @default(now()) @db.Timestamptz(3)
+  /// Stored in the base distance unit.
+  odometer    Decimal? @db.Decimal(10, 1)
+  cost        Decimal? @db.Decimal(12, 2)
+  shop        String?
+  notes       String?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
+
+  @@index([vehicleId, performedAt(sort: Desc)])
+  @@index([typeId])
   @@map("maintenance_entries")
 }
 
-model MaintenancePart {
-  id                String            @id @default(cuid())
-  maintenanceEntry  MaintenanceEntry  @relation(fields: [maintenanceEntryId], references: [id], onDelete: Cascade)
-  maintenanceEntryId String
-  name              String
-  partNumber        String?
-  quantity          Float             @default(1)
-  cost              Float?
-  currency          String?           @default("USD")
-  notes             String?
-  createdAt         DateTime          @default(now())
-  updatedAt         DateTime          @updatedAt
+/// Work that is due. One row per recurring job.
+model MaintenancePlan {
+  id        String  @id @default(cuid())
+  vehicleId String
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
 
-  @@map("maintenance_parts")
+  typeId String
+  type   Param  @relation("MaintenancePlanType", fields: [typeId], references: [id], onDelete: Restrict)
+
+  /// Stored in the base distance unit.
+  intervalDistance Int?
+  intervalMonths   Int?
+
+  lastDoneAt      DateTime? @db.Timestamptz(3)
+  /// Derived cache: lastDoneAt + intervalMonths.
+  nextDueAt       DateTime? @db.Timestamptz(3)
+  /// Stored in the base distance unit. Derived cache: last odometer + intervalDistance.
+  nextDueDistance Int?
+
+  notes String?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
+
+  @@index([vehicleId, nextDueAt])
+  @@index([typeId])
+  @@map("maintenance_plans")
 }
 
-model OdometerReading {
-  id                String    @id @default(cuid())
-  vehicle           Vehicle   @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
-  vehicleId         String
-  odometer          Float
-  odometerUnit      String    @default("mi")
-  date              DateTime  @default(now())
-  notes             String?
-  source            String?   @default("manual")
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+/// Documents. `group` splits personal documents (driver's licence) from
+/// vehicle documents (insurance, registration); `vehicleId` is optional so a
+/// personal document is stored once and not duplicated per car.
+///
+/// Documents are archived, never deleted: deactivating a vehicle also sets
+/// `isActive = false` on its documents, and replacing an expired policy is a
+/// deactivate + insert, so you keep the history.
+model VehicleDocument {
+  id String @id @default(cuid())
 
-  @@map("odometer_readings")
-}
+  groupId String
+  group   Param  @relation("DocumentGroup", fields: [groupId], references: [id], onDelete: Restrict)
 
-model QuickUpdate {
-  id                String    @id @default(cuid())
-  vehicle           Vehicle   @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
-  vehicleId         String
-  odometer          Float?
-  odometerUnit      String?   @default("mi")
-  fuelLevel         Float?    // percentage
-  fuelLevelUnit     String?   @default("%")
-  date              DateTime  @default(now())
-  notes             String?
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  typeId String
+  type   Param  @relation("DocumentType", fields: [typeId], references: [id], onDelete: Restrict)
 
-  @@map("quick_updates")
-}
+  vehicleId String?
+  vehicle   Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
 
-enum MaintenanceType {
-  OIL
-  MECHANICAL
-  ELECTRICAL
-  DOCUMENTATION
-  TIRES
-  BRAKES
-  FILTERS
-  OTHER
+  number   String?
+  provider String? // insurer / issuing authority
+
+  issuedAt  DateTime? @db.Date
+  expiresAt DateTime? @db.Date
+  cost      Decimal?  @db.Decimal(12, 2)
+
+  fileUrl String?
+  notes   String?
+
+  /// Archived instead of deleted. Set to false when its vehicle is deactivated.
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
+
+  @@index([vehicleId, isActive])
+  @@index([groupId, typeId, expiresAt(sort: Desc)])
+  @@map("vehicle_documents")
 }
