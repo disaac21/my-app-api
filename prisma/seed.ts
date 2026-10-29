@@ -1,107 +1,132 @@
-import { ParamKind, Prisma, PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
 /**
- * Params are key/value rows: (kind, key) -> JSON value.
- * This seed is additive and non-destructive: existing keys are left untouched
- * so runtime edits (renamed labels, changed display units) survive a re-seed.
+ * `params` holds one row per kind. `value` is an ordered array of options:
+ *   key:   "FUEL_TYPE"
+ *   value: [{ "key": "GASOLINE", "label": "Gasoline / Petrol" }, ...]
+ *
+ * Order is display order; the first entry is the default. Re-seeding is
+ * additive: an existing row is never overwritten, so your edits survive.
  */
-type ParamSeed = {
-  kind: ParamKind;
-  key: string;
-  value: Prisma.InputJsonValue;
-};
+type Option = { key: string; label: string; symbol?: string };
 
-const unit = (
-  label: string,
-  symbol: string,
-  factorToBase: number,
-  isBase: boolean,
-  sortOrder: number,
-): Prisma.InputJsonObject => ({ label, symbol, factorToBase, isBase, sortOrder });
+const unit = (key: string, label: string, symbol: string): Option => ({ key, label, symbol });
+const option = (key: string, label: string): Option => ({ key, label });
 
-const option = (label: string, sortOrder: number): Prisma.InputJsonObject => ({
-  label,
-  sortOrder,
-});
+type ParamSeed = { key: string; value: Option[] };
 
 const params: ParamSeed[] = [
-  // ── units ────────────────────────────────────────────────────────────────
-  // factorToBase = how many base units one of these equals.
-  // Base rows are immutable: flipping isBase reinterprets every stored value.
-  { kind: 'DISTANCE_UNIT', key: 'KM', value: unit('Kilometers', 'km', 1, true, 0) },
-  { kind: 'DISTANCE_UNIT', key: 'MI', value: unit('Miles', 'mi', 1.609344, false, 1) },
-
-  { kind: 'VOLUME_UNIT', key: 'L', value: unit('Litres', 'L', 1, true, 0) },
-  { kind: 'VOLUME_UNIT', key: 'GAL_US', value: unit('Gallons (US)', 'gal', 3.785411784, false, 1) },
-  { kind: 'VOLUME_UNIT', key: 'GAL_UK', value: unit('Gallons (UK)', 'gal', 4.54609, false, 2) },
-
-  { kind: 'PRESSURE_UNIT', key: 'KPA', value: unit('Kilopascals', 'kPa', 1, true, 0) },
-  { kind: 'PRESSURE_UNIT', key: 'PSI', value: unit('Pounds per square inch', 'psi', 6.894757, false, 1) },
-  { kind: 'PRESSURE_UNIT', key: 'BAR', value: unit('Bar', 'bar', 100, false, 2) },
-
-  // ── app settings ─────────────────────────────────────────────────────────
-  // Which unit/currency the UI shows. Storage always uses the base unit.
-  { kind: 'SETTING', key: 'default_distance_unit', value: 'KM' },
-  { kind: 'SETTING', key: 'default_volume_unit', value: 'L' },
-  { kind: 'SETTING', key: 'default_pressure_unit', value: 'KPA' },
-  { kind: 'SETTING', key: 'default_currency', value: 'USD' },
-
-  // ── value sets ───────────────────────────────────────────────────────────
-  { kind: 'CURRENCY', key: 'USD', value: { ...option('US Dollar', 0), symbol: '$' } },
-  { kind: 'CURRENCY', key: 'EUR', value: { ...option('Euro', 1), symbol: '€' } },
-  { kind: 'CURRENCY', key: 'GBP', value: { ...option('Pound Sterling', 2), symbol: '£' } },
-
-  { kind: 'FUEL_TYPE', key: 'GASOLINE', value: option('Gasoline / Petrol', 0) },
-  { kind: 'FUEL_TYPE', key: 'DIESEL', value: option('Diesel', 1) },
-  { kind: 'FUEL_TYPE', key: 'ELECTRIC', value: option('Electric', 2) },
-  { kind: 'FUEL_TYPE', key: 'HYBRID', value: option('Hybrid', 3) },
-  { kind: 'FUEL_TYPE', key: 'PLUGIN_HYBRID', value: option('Plug-in hybrid', 4) },
-  { kind: 'FUEL_TYPE', key: 'E85', value: option('E85', 5) },
-  { kind: 'FUEL_TYPE', key: 'CNG', value: option('Compressed natural gas', 6) },
-  { kind: 'FUEL_TYPE', key: 'LPG', value: option('Liquid petroleum gas', 7) },
-  { kind: 'FUEL_TYPE', key: 'HYDROGEN', value: option('Hydrogen', 8) },
-
-  { kind: 'TRANSMISSION_TYPE', key: 'MANUAL', value: option('Manual', 0) },
-  { kind: 'TRANSMISSION_TYPE', key: 'AUTOMATIC', value: option('Automatic', 1) },
-  { kind: 'TRANSMISSION_TYPE', key: 'CVT', value: option('CVT', 2) },
-  { kind: 'TRANSMISSION_TYPE', key: 'DCT', value: option('Dual clutch', 3) },
-  { kind: 'TRANSMISSION_TYPE', key: 'AMT', value: option('Automated manual', 4) },
-  { kind: 'TRANSMISSION_TYPE', key: 'SINGLE_SPEED', value: option('Single speed', 5) },
-
-  { kind: 'DRIVE_TYPE', key: 'FWD', value: option('Front-wheel drive', 0) },
-  { kind: 'DRIVE_TYPE', key: 'RWD', value: option('Rear-wheel drive', 1) },
-  { kind: 'DRIVE_TYPE', key: 'AWD', value: option('All-wheel drive', 2) },
-  { kind: 'DRIVE_TYPE', key: 'FOUR_WD', value: option('Four-wheel drive', 3) },
-
-  { kind: 'MAINTENANCE_TYPE', key: 'OIL', value: option('Oil', 0) },
-  { kind: 'MAINTENANCE_TYPE', key: 'MECHANICAL', value: option('Mechanical', 1) },
-  { kind: 'MAINTENANCE_TYPE', key: 'ELECTRICAL', value: option('Electrical', 2) },
-  { kind: 'MAINTENANCE_TYPE', key: 'TIRES', value: option('Tires', 3) },
-  { kind: 'MAINTENANCE_TYPE', key: 'BRAKES', value: option('Brakes', 4) },
-  { kind: 'MAINTENANCE_TYPE', key: 'FILTERS', value: option('Filters', 5) },
-  { kind: 'MAINTENANCE_TYPE', key: 'COOLING', value: option('Cooling', 6) },
-  { kind: 'MAINTENANCE_TYPE', key: 'TRANSMISSION', value: option('Transmission', 7) },
-  { kind: 'MAINTENANCE_TYPE', key: 'SUSPENSION', value: option('Suspension', 8) },
-  { kind: 'MAINTENANCE_TYPE', key: 'EXHAUST', value: option('Exhaust', 9) },
-  { kind: 'MAINTENANCE_TYPE', key: 'BODY', value: option('Body', 10) },
-  { kind: 'MAINTENANCE_TYPE', key: 'INSPECTION', value: option('Inspection', 11) },
-  { kind: 'MAINTENANCE_TYPE', key: 'OTHER', value: option('Other', 99) },
-
-  { kind: 'DOCUMENT_GROUP', key: 'PERSONAL', value: option('Personal', 0) },
-  { kind: 'DOCUMENT_GROUP', key: 'VEHICLE', value: option('Vehicle', 1) },
-
-  { kind: 'DOCUMENT_TYPE', key: 'DRIVER_LICENSE', value: option("Driver's licence", 0) },
-  { kind: 'DOCUMENT_TYPE', key: 'INSURANCE', value: option('Insurance', 1) },
-  { kind: 'DOCUMENT_TYPE', key: 'REGISTRATION', value: option('Car registration', 2) },
-
-  { kind: 'READING_SOURCE', key: 'MANUAL', value: option('Manual entry', 0) },
-  { kind: 'READING_SOURCE', key: 'FUEL_ENTRY', value: option('Fuel entry', 1) },
-  { kind: 'READING_SOURCE', key: 'MAINTENANCE', value: option('Maintenance', 2) },
-  { kind: 'READING_SOURCE', key: 'QUICK_UPDATE', value: option('Quick update', 3) },
-  { kind: 'READING_SOURCE', key: 'OBD', value: option('OBD device', 4) },
-  { kind: 'READING_SOURCE', key: 'IMPORT', value: option('Imported', 5) },
+  {
+    key: 'DISTANCE_UNIT',
+    value: [
+      unit('KM', 'Kilometers', 'km'),
+      unit('MI', 'Miles', 'mi'),
+    ],
+  },
+  {
+    key: 'VOLUME_UNIT',
+    value: [
+      unit('L', 'Litres', 'L'),
+      unit('GAL_US', 'Gallons (US)', 'gal'),
+      unit('GAL_UK', 'Gallons (UK)', 'gal'),
+    ],
+  },
+  {
+    key: 'PRESSURE_UNIT',
+    value: [
+      unit('KPA', 'Kilopascals', 'kPa'),
+      unit('PSI', 'Pounds per square inch', 'psi'),
+      unit('BAR', 'Bar', 'bar'),
+    ],
+  },
+  {
+    key: 'CURRENCY',
+    value: [
+      unit('USD', 'US Dollar', '$'),
+      unit('EUR', 'Euro', '€'),
+      unit('GBP', 'Pound Sterling', '£'),
+    ],
+  },
+  {
+    key: 'FUEL_TYPE',
+    value: [
+      option('GASOLINE', 'Gasoline / Petrol'),
+      option('DIESEL', 'Diesel'),
+      option('ELECTRIC', 'Electric'),
+      option('HYBRID', 'Hybrid'),
+      option('PLUGIN_HYBRID', 'Plug-in hybrid'),
+      option('E85', 'E85'),
+      option('CNG', 'Compressed natural gas'),
+      option('LPG', 'Liquid petroleum gas'),
+      option('HYDROGEN', 'Hydrogen'),
+    ],
+  },
+  {
+    key: 'TRANSMISSION_TYPE',
+    value: [
+      option('MANUAL', 'Manual'),
+      option('AUTOMATIC', 'Automatic'),
+      option('CVT', 'CVT'),
+      option('DCT', 'Dual clutch'),
+      option('AMT', 'Automated manual'),
+      option('SINGLE_SPEED', 'Single speed'),
+    ],
+  },
+  {
+    key: 'DRIVE_TYPE',
+    value: [
+      option('FWD', 'Front-wheel drive'),
+      option('RWD', 'Rear-wheel drive'),
+      option('AWD', 'All-wheel drive'),
+      option('FOUR_WD', 'Four-wheel drive'),
+    ],
+  },
+  {
+    key: 'MAINTENANCE_TYPE',
+    value: [
+      option('OIL', 'Oil'),
+      option('MECHANICAL', 'Mechanical'),
+      option('ELECTRICAL', 'Electrical'),
+      option('TIRES', 'Tires'),
+      option('BRAKES', 'Brakes'),
+      option('FILTERS', 'Filters'),
+      option('COOLING', 'Cooling'),
+      option('TRANSMISSION', 'Transmission'),
+      option('SUSPENSION', 'Suspension'),
+      option('EXHAUST', 'Exhaust'),
+      option('BODY', 'Body'),
+      option('INSPECTION', 'Inspection'),
+      option('OTHER', 'Other'),
+    ],
+  },
+  {
+    key: 'DOCUMENT_GROUP',
+    value: [
+      option('PERSONAL', 'Personal'),
+      option('VEHICLE', 'Vehicle'),
+    ],
+  },
+  {
+    key: 'DOCUMENT_TYPE',
+    value: [
+      option('DRIVER_LICENSE', "Driver's licence"),
+      option('INSURANCE', 'Insurance'),
+      option('REGISTRATION', 'Car registration'),
+    ],
+  },
+  {
+    key: 'READING_SOURCE',
+    value: [
+      option('MANUAL', 'Manual entry'),
+      option('FUEL_ENTRY', 'Fuel entry'),
+      option('MAINTENANCE', 'Maintenance'),
+      option('QUICK_UPDATE', 'Quick update'),
+      option('OBD', 'OBD device'),
+      option('IMPORT', 'Imported'),
+    ],
+  },
 ];
 
 /**
@@ -145,15 +170,15 @@ const catalogue: Record<string, string[]> = {
 };
 
 async function seedParams() {
-  const existing = await prisma.param.findMany({
-    select: { kind: true, key: true },
-  });
-  const have = new Set(existing.map((p) => `${p.kind}::${p.key}`));
+  const existing = await prisma.param.findMany({ select: { key: true } });
+  const have = new Set(existing.map((p) => p.key));
 
   let created = 0;
   for (const p of params) {
-    if (have.has(`${p.kind}::${p.key}`)) continue;
-    await prisma.param.create({ data: { kind: p.kind, key: p.key, value: p.value } });
+    if (have.has(p.key)) continue;
+    await prisma.param.create({
+      data: { key: p.key, value: p.value as unknown as Prisma.InputJsonValue },
+    });
     created += 1;
   }
   console.log(`params: ${created} created, ${have.size} already present`);

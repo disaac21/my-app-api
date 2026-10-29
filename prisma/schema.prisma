@@ -1,17 +1,18 @@
 // Vehicle hub schema.
 //
 // Design rules:
-//  - `params` is a key/value registry. Every unit, currency, enum value and
-//    scalar setting is a row: `(kind, key) -> value (jsonb)`. Adding a fuel
-//    type or maintenance type is data, not a migration.
-//  - Rows still have an `id`, so all `*Id` columns can keep real foreign keys
-//    and `onDelete: Restrict` protection. This is the only way to have both a
-//    KV table and referential integrity: Postgres cannot FK into JSON.
-//  - `ParamKind` is the only native enum: it is the shape of the registry that
-//    code must switch on. Everything under a kind is data.
-//  - All measurements are stored in the BASE unit declared in `params`
-//    (`value.isBase = true` for DISTANCE_UNIT / VOLUME_UNIT / PRESSURE_UNIT).
-//    Base units are immutable. Never flip `isBase` on a live database.
+//  - `params` is a key/value registry: ONE row per kind, `value` is an ordered
+//    JSON array of options.
+//      key:   "FUEL_TYPE"
+//      value: [{ "key": "GASOLINE", "label": "Gasoline / Petrol" },
+//              { "key": "DIESEL",   "label": "Diesel" }]
+//    Array order is display order. The first entry is the default.
+//  - Options are referenced by their `key` string, e.g.
+//    vehicles."fuelType" = 'DIESEL'. There are deliberately no foreign keys
+//    into `params`: Postgres cannot FK into a JSON array. ParamsService is
+//    responsible for rejecting unknown codes.
+//  - Unit conversion maths lives in code (storage units are km, L, kPa).
+//    `params` only carries labels and symbols for display.
 //  - Money is Decimal, never Float. Timestamps are timestamptz. Dates are date.
 //  - Derived values ARE stored (pricePerUnit, efficiency, tripDistance,
 //    currentOdometer, nextDueAt/nextDueDistance) for cheap reads. Every write
@@ -29,58 +30,24 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum ParamKind {
-  // unit configuration (value: { label, symbol, factorToBase, isBase, sortOrder })
-  DISTANCE_UNIT
-  VOLUME_UNIT
-  PRESSURE_UNIT
-  // selectable value sets (value: { label, sortOrder })
-  CURRENCY
-  FUEL_TYPE
-  TRANSMISSION_TYPE
-  DRIVE_TYPE
-  MAINTENANCE_TYPE
-  DOCUMENT_TYPE
-  DOCUMENT_GROUP
-  READING_SOURCE
-  // scalar app settings (value: any JSON, e.g. "KM")
-  SETTING
-}
-
-/// One row per parameter, unit, or enum value.
+/// One row per kind of option list. Known keys:
+///   DISTANCE_UNIT, VOLUME_UNIT, PRESSURE_UNIT, CURRENCY,
+///   FUEL_TYPE, TRANSMISSION_TYPE, DRIVE_TYPE, MAINTENANCE_TYPE,
+///   DOCUMENT_TYPE, DOCUMENT_GROUP, READING_SOURCE
 ///
-/// value shapes by kind:
-///   DISTANCE_UNIT   { "label": "Miles", "symbol": "mi",
-///                     "factorToBase": 1.609344, "isBase": false, "sortOrder": 1 }
-///   FUEL_TYPE       { "label": "Diesel", "sortOrder": 1 }
-///   SETTING         "KM"            // arbitrary JSON; the setting's value
+/// value shapes:
+///   DISTANCE_UNIT / VOLUME_UNIT / PRESSURE_UNIT
+///     [{ "key": "MI", "label": "Miles", "symbol": "mi" }, ...]
+///   CURRENCY
+///     [{ "key": "USD", "label": "US Dollar", "symbol": "$" }, ...]
+///   everything else
+///     [{ "key": "DIESEL", "label": "Diesel" }, ...]
 model Param {
-  id       String    @id @default(cuid())
-  kind     ParamKind
-  /// Stable identifier used by code and the API ("KM", "DIESEL", "OIL").
-  /// Treat as a contract: edit labels inside `value`, never rename `key`.
-  key      String
-  value    Json
-  /// Retire a value instead of deleting it. Referenced rows cannot be deleted
-  /// anyway (onDelete: Restrict on every FK below).
-  isActive Boolean   @default(true)
-
+  key       String   @id
+  value     Json
   createdAt DateTime @default(now()) @db.Timestamptz(3)
   updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
 
-  vehiclesByFuelType     Vehicle[] @relation("VehicleFuelType")
-  vehiclesByTransmission Vehicle[] @relation("VehicleTransmission")
-  vehiclesByDriveType    Vehicle[] @relation("VehicleDriveType")
-
-  readings           VehicleReading[]   @relation("ReadingSource")
-  fuelEntries        FuelEntry[]        @relation("FuelEntryFuelType")
-  maintenanceEntries MaintenanceEntry[] @relation("MaintenanceEntryType")
-  maintenancePlans   MaintenancePlan[]  @relation("MaintenancePlanType")
-  documents          VehicleDocument[]  @relation("DocumentType")
-  documentGroups     VehicleDocument[]  @relation("DocumentGroup")
-
-  @@unique([kind, key])
-  @@index([kind])
   @@map("params")
 }
 
@@ -118,17 +85,17 @@ model Vehicle {
   plate    String  @unique
   colorHex String? @db.VarChar(7) // #RRGGBB
 
-  engine         String?
-  fuelTypeId     String?
-  fuelType       Param?  @relation("VehicleFuelType", fields: [fuelTypeId], references: [id], onDelete: Restrict)
-  transmissionId String?
-  transmission   Param?  @relation("VehicleTransmission", fields: [transmissionId], references: [id], onDelete: Restrict)
-  driveTypeId    String?
-  driveType      Param?  @relation("VehicleDriveType", fields: [driveTypeId], references: [id], onDelete: Restrict)
+  engine       String?
+  /// Code from params.FUEL_TYPE.
+  fuelType     String?
+  /// Code from params.TRANSMISSION_TYPE.
+  transmission String?
+  /// Code from params.DRIVE_TYPE.
+  driveType    String?
 
-  /// Stored in the base volume unit (params.VOLUME_UNIT where value.isBase).
+  /// Stored in the base volume unit (L).
   tankCapacity      Decimal? @db.Decimal(6, 1)
-  /// Stored in the base pressure unit (params.PRESSURE_UNIT where value.isBase).
+  /// Stored in the base pressure unit (kPa).
   tirePressureFront Int?
   tirePressureRear  Int?
 
@@ -136,7 +103,7 @@ model Vehicle {
   oilSpecification String?
   batteryVoltage   Decimal? @db.Decimal(4, 1)
 
-  /// Derived cache of the latest reading. Stored in the base distance unit.
+  /// Derived cache of the latest reading. Stored in the base distance unit (km).
   currentOdometer Decimal? @db.Decimal(10, 1)
 
   readings           VehicleReading[]
@@ -166,8 +133,8 @@ model VehicleReading {
 
   odometer     Decimal? @db.Decimal(10, 1)
   fuelLevelPct Int?
-  sourceId     String?
-  source       Param?   @relation("ReadingSource", fields: [sourceId], references: [id], onDelete: Restrict)
+  /// Code from params.READING_SOURCE.
+  source       String?  @default("MANUAL")
 
   recordedAt DateTime @default(now()) @db.Timestamptz(3)
   notes      String?
@@ -186,16 +153,16 @@ model FuelEntry {
 
   filledAt DateTime @default(now()) @db.Timestamptz(3)
 
-  /// Stored in the base distance unit.
+  /// Stored in the base distance unit (km).
   odometer Decimal @db.Decimal(10, 1)
-  /// Stored in the base volume unit.
+  /// Stored in the base volume unit (L).
   volume   Decimal @db.Decimal(8, 3)
 
   priceTotal Decimal @db.Decimal(12, 2)
 
-  station    String?
-  fuelTypeId String?
-  fuelType   Param?  @relation("FuelEntryFuelType", fields: [fuelTypeId], references: [id], onDelete: Restrict)
+  station  String?
+  /// Code from params.FUEL_TYPE.
+  fuelType String?
 
   /// Both flags are required for correct fuel-economy maths: a partial fill-up
   /// or a skipped logging session breaks the distance/volume ratio.
@@ -225,14 +192,14 @@ model MaintenanceEntry {
   vehicleId String
   vehicle   Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
 
-  typeId String
-  type   Param  @relation("MaintenanceEntryType", fields: [typeId], references: [id], onDelete: Restrict)
+  /// Code from params.MAINTENANCE_TYPE.
+  type String
 
   title       String?
   description String?
 
   performedAt DateTime @default(now()) @db.Timestamptz(3)
-  /// Stored in the base distance unit.
+  /// Stored in the base distance unit (km).
   odometer    Decimal? @db.Decimal(10, 1)
   cost        Decimal? @db.Decimal(12, 2)
   shop        String?
@@ -242,7 +209,7 @@ model MaintenanceEntry {
   updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
 
   @@index([vehicleId, performedAt(sort: Desc)])
-  @@index([typeId])
+  @@index([type])
   @@map("maintenance_entries")
 }
 
@@ -252,10 +219,10 @@ model MaintenancePlan {
   vehicleId String
   vehicle   Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
 
-  typeId String
-  type   Param  @relation("MaintenancePlanType", fields: [typeId], references: [id], onDelete: Restrict)
+  /// Code from params.MAINTENANCE_TYPE.
+  type String
 
-  /// Stored in the base distance unit.
+  /// Stored in the base distance unit (km).
   intervalDistance Int?
   intervalMonths   Int?
 
@@ -271,7 +238,7 @@ model MaintenancePlan {
   updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
 
   @@index([vehicleId, nextDueAt])
-  @@index([typeId])
+  @@index([type])
   @@map("maintenance_plans")
 }
 
@@ -285,11 +252,11 @@ model MaintenancePlan {
 model VehicleDocument {
   id String @id @default(cuid())
 
-  groupId String
-  group   Param  @relation("DocumentGroup", fields: [groupId], references: [id], onDelete: Restrict)
+  /// Code from params.DOCUMENT_GROUP: PERSONAL | VEHICLE.
+  group String
 
-  typeId String
-  type   Param  @relation("DocumentType", fields: [typeId], references: [id], onDelete: Restrict)
+  /// Code from params.DOCUMENT_TYPE: DRIVER_LICENSE | INSURANCE | REGISTRATION.
+  type String
 
   vehicleId String?
   vehicle   Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
@@ -311,6 +278,6 @@ model VehicleDocument {
   updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
 
   @@index([vehicleId, isActive])
-  @@index([groupId, typeId, expiresAt(sort: Desc)])
+  @@index([group, type, expiresAt(sort: Desc)])
   @@map("vehicle_documents")
 }

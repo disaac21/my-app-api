@@ -41,27 +41,12 @@ ALTER TABLE "maintenance_plans"
 
 -- ── documents ───────────────────────────────────────────────────────────────
 -- A personal document (driver's licence) must NOT be tied to a vehicle;
--- a vehicle document (insurance, registration) must be. The group is a params
--- row, so this cannot be a plain CHECK.
-CREATE OR REPLACE FUNCTION "check_document_group"() RETURNS trigger AS $$
-DECLARE
-  group_key text;
-BEGIN
-  SELECT key INTO group_key FROM "params" WHERE id = NEW."groupId";
-
-  IF group_key = 'VEHICLE' AND NEW."vehicleId" IS NULL THEN
-    RAISE EXCEPTION 'vehicle document requires a vehicleId';
-  END IF;
-
-  IF group_key = 'PERSONAL' AND NEW."vehicleId" IS NOT NULL THEN
-    RAISE EXCEPTION 'personal document must not reference a vehicle';
-  END IF;
-
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS "vehicle_documents_group_check" ON "vehicle_documents";
-CREATE TRIGGER "vehicle_documents_group_check"
-  BEFORE INSERT OR UPDATE ON "vehicle_documents"
-  FOR EACH ROW EXECUTE FUNCTION "check_document_group"();
+-- a vehicle document (insurance, registration) must be. Because `group` is now
+-- a plain code column, this is a simple CHECK (it used to need a trigger when
+-- the group was a foreign key).
+ALTER TABLE "vehicle_documents"
+  ADD CONSTRAINT "vehicle_documents_group_check"
+    CHECK (
+      ("group" = 'VEHICLE'  AND "vehicleId" IS NOT NULL) OR
+      ("group" = 'PERSONAL' AND "vehicleId" IS NULL)
+    );
