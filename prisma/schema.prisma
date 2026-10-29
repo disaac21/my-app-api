@@ -17,9 +17,11 @@
 //  - Derived values ARE stored (pricePerUnit, efficiency, tripDistance,
 //    currentOdometer, nextDueAt/nextDueDistance) for cheap reads. Every write
 //    path that can change an input must recompute them.
-//  - Nothing is deleted by cascade. Child FKs use onDelete: Restrict; deleting
-//    a vehicle is a soft delete (isActive = false) that also archives its
-//    documents. No history is lost, and a mistaken delete is reversible.
+//  - Nothing is deleted, by cascade or otherwise. Every row has `isActive`;
+//    DELETE on any resource means "archive" (isActive = false). Foreign keys
+//    are onDelete: Restrict, so a hard delete fails loudly instead of taking
+//    history with it. Archived rows are excluded from reads and from derived
+//    calculations, and can be resurrected at any time.
 
 generator client {
   provider = "prisma-client-js"
@@ -139,10 +141,13 @@ model VehicleReading {
   recordedAt DateTime @default(now()) @db.Timestamptz(3)
   notes      String?
 
+  /// Archived instead of deleted. Nothing in this app is hard-deleted.
+  isActive Boolean @default(true)
+
   createdAt DateTime @default(now()) @db.Timestamptz(3)
   updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
 
-  @@index([vehicleId, recordedAt(sort: Desc)])
+  @@index([vehicleId, isActive, recordedAt(sort: Desc)])
   @@map("vehicle_readings")
 }
 
@@ -179,10 +184,15 @@ model FuelEntry {
 
   notes String?
 
+  /// Archived instead of deleted. Inactive entries are skipped by the fuel
+  /// chain recompute — they still exist for history, but must not influence
+  /// tripDistance / efficiency of the entries around them.
+  isActive Boolean @default(true)
+
   createdAt DateTime @default(now()) @db.Timestamptz(3)
   updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
 
-  @@index([vehicleId, filledAt(sort: Desc)])
+  @@index([vehicleId, isActive, filledAt(sort: Desc)])
   @@map("fuel_entries")
 }
 
@@ -205,10 +215,13 @@ model MaintenanceEntry {
   shop        String?
   notes       String?
 
+  /// Archived instead of deleted.
+  isActive Boolean @default(true)
+
   createdAt DateTime @default(now()) @db.Timestamptz(3)
   updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
 
-  @@index([vehicleId, performedAt(sort: Desc)])
+  @@index([vehicleId, isActive, performedAt(sort: Desc)])
   @@index([type])
   @@map("maintenance_entries")
 }
@@ -226,18 +239,24 @@ model MaintenancePlan {
   intervalDistance Int?
   intervalMonths   Int?
 
-  lastDoneAt      DateTime? @db.Timestamptz(3)
+  lastDoneAt       DateTime? @db.Timestamptz(3)
+  /// Odometer at the moment the job was last done. Required to derive
+  /// `nextDueDistance`; without it the distance interval has no anchor.
+  lastDoneOdometer Decimal?  @db.Decimal(10, 1)
   /// Derived cache: lastDoneAt + intervalMonths.
-  nextDueAt       DateTime? @db.Timestamptz(3)
-  /// Stored in the base distance unit. Derived cache: last odometer + intervalDistance.
-  nextDueDistance Int?
+  nextDueAt        DateTime? @db.Timestamptz(3)
+  /// Stored in the base distance unit. Derived cache: lastDoneOdometer + intervalDistance.
+  nextDueDistance  Int?
 
   notes String?
+
+  /// Archived instead of deleted.
+  isActive Boolean @default(true)
 
   createdAt DateTime @default(now()) @db.Timestamptz(3)
   updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
 
-  @@index([vehicleId, nextDueAt])
+  @@index([vehicleId, isActive, nextDueAt])
   @@index([type])
   @@map("maintenance_plans")
 }

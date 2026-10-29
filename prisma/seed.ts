@@ -10,10 +10,20 @@ const prisma = new PrismaClient();
  * Order is display order; the first entry is the default. Re-seeding is
  * additive: an existing row is never overwritten, so your edits survive.
  */
-type Option = { key: string; label: string; symbol?: string };
+type Option = {
+  key: string;
+  label: string;
+  symbol?: string;
+  /** Only meaningful on DOCUMENT_TYPE: which DOCUMENT_GROUP the type belongs to. */
+  groups?: string[];
+};
 
 const unit = (key: string, label: string, symbol: string): Option => ({ key, label, symbol });
-const option = (key: string, label: string): Option => ({ key, label });
+const option = (key: string, label: string, groups?: string[]): Option => ({
+  key,
+  label,
+  ...(groups ? { groups } : {}),
+});
 
 type ParamSeed = { key: string; value: Option[] };
 
@@ -111,9 +121,11 @@ const params: ParamSeed[] = [
   {
     key: 'DOCUMENT_TYPE',
     value: [
-      option('DRIVER_LICENSE', "Driver's licence"),
-      option('INSURANCE', 'Insurance'),
-      option('REGISTRATION', 'Car registration'),
+      // A licence belongs to the driver, never to a car; insurance and
+      // registration always do. The API enforces this mapping on write.
+      option('DRIVER_LICENSE', "Driver's licence", ['PERSONAL']),
+      option('INSURANCE', 'Insurance', ['VEHICLE']),
+      option('REGISTRATION', 'Car registration', ['VEHICLE']),
     ],
   },
   {

@@ -1,34 +1,51 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
+import {
+  CreateMaintenanceEntryDto,
+  QueryMaintenanceEntriesDto,
+  UpdateMaintenanceEntryDto,
+} from './dto/maintenance-entry.dto';
 import { MaintenanceEntriesService } from './maintenance-entries.service';
-import { CreateMaintenanceEntryDto } from './dto/create-maintenance-entry.dto';
-import { UpdateMaintenanceEntryDto } from './dto/update-maintenance-entry.dto';
 
 @Controller('maintenance-entries')
 export class MaintenanceEntriesController {
-  constructor(private readonly maintenanceEntriesService: MaintenanceEntriesService) {}
-
-  @Post()
-  create(@Body() createMaintenanceEntryDto: CreateMaintenanceEntryDto) {
-    return this.maintenanceEntriesService.create(createMaintenanceEntryDto);
-  }
+  constructor(private readonly entries: MaintenanceEntriesService) {}
 
   @Get()
-  findAll(@Query('vehicleId') vehicleId?: string, @Query('type') type?: string) {
-    return this.maintenanceEntriesService.findAll(vehicleId, type);
+  findAll(@Query() query: QueryMaintenanceEntriesDto) {
+    return this.entries.findAll(query);
+  }
+
+  @Post()
+  create(@Body() dto: CreateMaintenanceEntryDto) {
+    return this.entries.create(dto);
   }
 
   @Get(':id')
   findOne(@Param('id') id: string) {
-    return this.maintenanceEntriesService.findOne(id);
+    return this.entries.findOne(id);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateMaintenanceEntryDto: UpdateMaintenanceEntryDto) {
-    return this.maintenanceEntriesService.update(id, updateMaintenanceEntryDto);
+  update(@Param('id') id: string, @Body() dto: UpdateMaintenanceEntryDto) {
+    return this.entries.update(id, dto);
   }
 
   @Delete(':id')
   remove(@Param('id') id: string) {
-    return this.maintenanceEntriesService.remove(id);
+    return this.entries.remove(id);
+  }
+
+  @Post(':id/restore')
+  restore(@Param('id') id: string) {
+    return this.entries.restore(id);
   }
 }

@@ -1,44 +1,56 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
+import { parseFlag } from '../common/utils/flags';
+import {
+  CreateVehicleDto,
+  QueryVehiclesDto,
+  UpdateVehicleDto,
+} from './dto/vehicle.dto';
 import { VehiclesService } from './vehicles.service';
-import { CreateVehicleDto } from './dto/create-vehicle.dto';
-import { UpdateVehicleDto } from './dto/update-vehicle.dto';
 
 @Controller('vehicles')
 export class VehiclesController {
   constructor(private readonly vehiclesService: VehiclesService) {}
 
-  @Post()
-  create(@Body() createVehicleDto: CreateVehicleDto) {
-    return this.vehiclesService.create(createVehicleDto);
+  @Get()
+  findAll(@Query() query: QueryVehiclesDto) {
+    return this.vehiclesService.findAll(query);
   }
 
-  @Get()
-  findAll() {
-    return this.vehiclesService.findAll();
+  @Post()
+  create(@Body() dto: CreateVehicleDto) {
+    return this.vehiclesService.create(dto);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.vehiclesService.findOne(id);
-  }
-
-  @Get('plate/:plate')
-  findByPlate(@Param('plate') plate: string) {
-    return this.vehiclesService.findByPlate(plate);
-  }
-
-  @Get(':id/stats')
-  getStats(@Param('id') id: string) {
-    return this.vehiclesService.getVehicleStats(id);
+  findOne(
+    @Param('id') id: string,
+    @Query('includeArchived') includeArchived?: string,
+  ) {
+    return this.vehiclesService.findOne(id, parseFlag(includeArchived));
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateVehicleDto: UpdateVehicleDto) {
-    return this.vehiclesService.update(id, updateVehicleDto);
+  update(@Param('id') id: string, @Body() dto: UpdateVehicleDto) {
+    return this.vehiclesService.update(id, dto);
   }
 
+  /** Archive: sets isActive = false and archives the vehicle's documents. */
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.vehiclesService.remove(id);
+  }
+
+  @Post(':id/restore')
+  restore(@Param('id') id: string) {
+    return this.vehiclesService.restore(id);
   }
 }
