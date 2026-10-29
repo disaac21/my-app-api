@@ -17,3 +17,8 @@ export function addMonths(date: Date, months: number): Date {
 
   return result;
 }
+
+/** Adds whole days; used for the "due soon" horizon. */
+export function addDays(date: Date, days: number): Date {
+  return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
+}

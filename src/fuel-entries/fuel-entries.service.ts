@@ -40,6 +40,10 @@ export class FuelEntriesService {
   async findAll(query: QueryFuelEntriesDto): Promise<Paginated<unknown>> {
     const where: Prisma.FuelEntryWhereInput = {
       isActive: query.isActive,
+      // An archived vehicle is hidden from lists, so its history is too.
+      ...(query.includeArchivedVehicles
+        ? {}
+        : { vehicle: { is: { isActive: true } } }),
       ...(query.vehicleId ? { vehicleId: query.vehicleId } : {}),
       ...(query.from || query.to
         ? {
@@ -100,6 +104,7 @@ export class FuelEntriesService {
     }
 
     await this.params.assertCode('FUEL_TYPE', dto.fuelType, 'fuelType');
+    await this.guard.ensureActive(existing.vehicleId);
 
     const priceTotal = dto.priceTotal ?? Number(existing.priceTotal);
     const volume = dto.volume ?? Number(existing.volume);

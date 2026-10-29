@@ -10,9 +10,8 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+import { ArchiveFilterQueryDto } from '../../common/dto/archive-query.dto';
 import { IsDateValue } from '../../common/validators/is-date-value';
-import { ToBoolean } from '../../common/transforms/to-boolean';
 
 export class CreateFuelEntryDto {
   @IsString()
@@ -76,7 +75,7 @@ export class UpdateFuelEntryDto extends PartialType(
   OmitType(CreateFuelEntryDto, ['vehicleId'] as const),
 ) {}
 
-export class QueryFuelEntriesDto extends PaginationQueryDto {
+export class QueryFuelEntriesDto extends ArchiveFilterQueryDto {
   @IsOptional()
   @IsString()
   vehicleId?: string;
@@ -90,9 +89,4 @@ export class QueryFuelEntriesDto extends PaginationQueryDto {
   @Type(() => Date)
   @IsDateValue()
   to?: Date;
-
-  @IsOptional()
-  @ToBoolean()
-  @IsBoolean()
-  isActive: boolean = true;
 }

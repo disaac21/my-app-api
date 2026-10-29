@@ -37,6 +37,13 @@ export class VehicleDocumentsService {
   async findAll(query: QueryVehicleDocumentsDto): Promise<Paginated<unknown>> {
     const where: Prisma.VehicleDocumentWhereInput = {
       isActive: query.isActive,
+      // Personal documents have no vehicle, so they always belong in the list;
+      // vehicle documents follow their vehicle's archived state.
+      ...(query.includeArchivedVehicles
+        ? {}
+        : {
+            OR: [{ vehicleId: null }, { vehicle: { is: { isActive: true } } }],
+          }),
       ...(query.group ? { group: query.group } : {}),
       ...(query.type ? { type: query.type } : {}),
       ...(query.vehicleId ? { vehicleId: query.vehicleId } : {}),

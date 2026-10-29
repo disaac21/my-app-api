@@ -33,6 +33,10 @@ export class VehicleReadingsService {
   async findAll(query: QueryVehicleReadingsDto): Promise<Paginated<unknown>> {
     const where: Prisma.VehicleReadingWhereInput = {
       isActive: query.isActive,
+      // An archived vehicle is hidden from lists, so its history is too.
+      ...(query.includeArchivedVehicles
+        ? {}
+        : { vehicle: { is: { isActive: true } } }),
       ...(query.vehicleId ? { vehicleId: query.vehicleId } : {}),
       ...(query.from || query.to
         ? {
@@ -91,6 +95,7 @@ export class VehicleReadingsService {
     }
 
     await this.params.assertCode('READING_SOURCE', dto.source, 'source');
+    await this.guard.ensureActive(existing.vehicleId);
     this.assertHasMeasurement({
       odometer: dto.odometer !== undefined ? dto.odometer : existing.odometer,
       fuelLevelPct:

@@ -11,6 +11,7 @@ import {
 import {
   CompleteMaintenancePlanDto,
   CreateMaintenancePlanDto,
+  DueMaintenancePlansQueryDto,
   QueryMaintenancePlansDto,
   UpdateMaintenancePlanDto,
 } from './dto/maintenance-plan.dto';
@@ -28,6 +29,12 @@ export class MaintenancePlansController {
   @Post()
   create(@Body() dto: CreateMaintenancePlanDto) {
     return this.plans.create(dto);
+  }
+
+  /** What is due now, and what will be inside the horizon. Must precede :id. */
+  @Get('due')
+  findDue(@Query() query: DueMaintenancePlansQueryDto) {
+    return this.plans.findDue(query);
   }
 
   @Get(':id')

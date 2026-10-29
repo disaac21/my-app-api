@@ -11,7 +11,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+import { ArchiveFilterQueryDto } from '../../common/dto/archive-query.dto';
 import { IsDateValue } from '../../common/validators/is-date-value';
 import { ToBoolean } from '../../common/transforms/to-boolean';
 
@@ -62,7 +62,7 @@ export class UpdateMaintenancePlanDto extends PartialType(
   OmitType(CreateMaintenancePlanDto, ['vehicleId'] as const),
 ) {}
 
-export class QueryMaintenancePlansDto extends PaginationQueryDto {
+export class QueryMaintenancePlansDto extends ArchiveFilterQueryDto {
   @IsOptional()
   @IsString()
   vehicleId?: string;
@@ -76,11 +76,40 @@ export class QueryMaintenancePlansDto extends PaginationQueryDto {
   @Type(() => Date)
   @IsDateValue()
   dueBefore?: Date;
+}
+
+/**
+ * Thresholds for the "due soon" bucket. The distance figure is 300 miles
+ * rounded up to a round number in the base unit (300 mi ≈ 483 km).
+ */
+export const DUE_SOON_DAYS = 30;
+export const DUE_SOON_DISTANCE_KM = 500;
+
+export class DueMaintenancePlansQueryDto {
+  @IsOptional()
+  @IsString()
+  vehicleId?: string;
 
   @IsOptional()
   @ToBoolean()
   @IsBoolean()
-  isActive: boolean = true;
+  includeArchivedVehicles: boolean = false;
+
+  /** Defaults to 30 days. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(365)
+  horizonDays: number = DUE_SOON_DAYS;
+
+  /** Defaults to 500 km (≈300 miles). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(100000)
+  horizonDistance: number = DUE_SOON_DISTANCE_KM;
 }
 
 export class CompleteMaintenancePlanDto {
